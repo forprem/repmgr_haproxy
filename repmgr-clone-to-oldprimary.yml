@@ -1,0 +1,4 @@
+---
+- import_playbook: repmgr-clone.yml
+  vars:
+    clone_target: "{{ groups['database'][0] }}"

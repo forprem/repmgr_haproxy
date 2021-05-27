@@ -1,0 +1,7 @@
+# Per Prem Prakash on 1/1/2021
+# Version 1.0
+#
+Cmnd_Alias POSTGRES_CMD=/bin/systemctl restart postgresql-9.6, /bin/systemctl start postgresql-9.6, /bin/systemctl stop postgresql-9.6, /bin/systemctl reload postgresql-9.6
+Cmnd_Alias REPMGR_CMD=/bin/systemctl start repmgr96.service, /bin/systemctl stop repmgr96.service
+
+postgres ALL=NOPASSWD: POSTGRES_CMD,REPMGR_CMD

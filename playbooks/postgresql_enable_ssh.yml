@@ -1,0 +1,69 @@
+---
+#configure master database ssh connection to replica servers for postgres user
+- name: "Configure master ssh connection to replica server(s)"
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+   ansible_ssh_user: root
+  tasks:
+
+    - include_role:
+        name: ../roles/ssh_setup
+      vars:
+        - ssh_setup_source_host: "{{ groups['database'][0] | default([]) }}"
+        - ssh_setup_target_hosts: "{{ target_host_item  }}"
+        - ssh_ssh_setup_action: add
+      loop: "{{ [query('inventory_hostnames','database_replica')] }}"
+      loop_control:
+        loop_var: target_host_item
+    
+
+
+#configure replica database ssh connection with master server
+- name: "Configure replica ssh connection to master"
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+   ansible_ssh_user: root
+  tasks:
+    - include_role:
+        name: ../roles/ssh_setup
+      vars:
+        - ssh_setup_source_host: "{{ source_host_item }}"
+        - ssh_setup_target_hosts: "{{ [groups['database'][0]] }}"
+        - ssh_ssh_setup_action: add
+      loop: "{{ query('inventory_hostnames','database_replica') }}"
+      loop_control:
+        loop_var: source_host_item       
+
+#configure replica1 database ssh connection to replica2 servers for postgres user
+- name: "Configure replica1 ssh connection to replica2 server(s)"
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+   ansible_ssh_user: root
+  tasks:
+    - include_role:
+        name: ../roles/ssh_setup
+      vars:
+        - ssh_setup_source_host: "{{ groups['database_replica'][1] }}"
+        - ssh_setup_target_hosts: "{{ [groups['database_replica'][0]] }}"
+        - ssh_ssh_setup_action: add   
+
+#configure replica2 database ssh connection to replica1 servers for postgres user
+- name: "Configure replica1 ssh connection to replica2 server(s)"
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+   ansible_ssh_user: root
+  tasks:
+    - include_role:
+        name: ../roles/ssh_setup
+      vars:
+        - ssh_setup_source_host: "{{ groups['database_replica'][0] }}"
+        - ssh_setup_target_hosts: "{{ [groups['database_replica'][1]] }}"
+        - ssh_ssh_setup_action: add 

@@ -1,0 +1,13 @@
+---
+
+- name: Check for source host
+  assert:
+    that: ssh_setup_source_host is defined and ssh_setup_source_host | length > 0
+    fail_msg: |
+      ssh_setup_source_host not provided.
+
+- name: Check for target hosts
+  assert:
+    that: ssh_setup_target_hosts is defined and ssh_setup_target_hosts | length > 0
+    fail_msg: |
+      ssh_setup_target_hosts not provided.

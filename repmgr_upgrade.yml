@@ -1,0 +1,84 @@
+- import_playbook: awx-enable-repos.yml
+
+- import_playbook: repmgr-determine-primary-ha-script.yml
+  ignore_errors: yes
+
+- name: RepMgr Verification
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+  tasks:
+
+    - name: Validate if RepMgr already exists
+      debug:
+        msg: "RepMgr Cluster already exists now Upgrading {{ groups['database_primary'][0] }}"
+      when: groups['database_primary'] is defined
+
+    - name: Get the node_id for primary server "{{ groups['database_primary'][0] }}"
+      shell: psql repmgr -c "select node_id from repmgr.nodes where node_name='{{ groups['database_primary'][0] }}';"
+      register: node_info
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      delegate_to: "{{ groups['database_primary'][0] }}"
+      changed_when: false
+
+    - name: Set Fact for node_id
+      set_fact:
+        node_id:  "{{ node_info.stdout | regex_search('-\\s*(\\d)', '\\1') | trim   }}"
+      when: node_info.stdout_lines is defined
+
+    - debug:
+        msg: "{{ node_id }}"
+      when: node_id | length > 0
+
+    # - name: Fail for Testing
+    #   fail:
+    #     msg: "Failed Force {{ hostvars['localhost']['node_id'][0] }}"
+    #   when: groups['database_primary'] is defined
+
+# Already installed RepMgr Cluster
+
+- hosts: database_primary
+  gather_facts: true
+  any_errors_fatal: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgresql/defaults/main.yml
+  vars:
+    repmgr_version: "96"
+    postgresql_version: "9.6"
+    repmgr_package_state: "present"
+    node_id: "{{ hostvars['localhost']['node_id'][0] }}"
+    
+  roles:
+    - role: postgres_repmgr
+      vars:
+        pgsqlrep_role: master
+        node_id: "{{ hostvars['localhost']['node_id'][0] }}"
+      when: groups['database_primary'] is defined
+
+
+
+- hosts: "database_replica:database:!{{ groups['database_primary'][0] }}"
+  gather_facts: true
+  any_errors_fatal: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgresql/defaults/main.yml
+  vars:
+    repmgr_version: "96"
+    postgresql_version: "9.6"
+    repmgr_package_state: "present"
+    node_id: "{{ hostvars['localhost']['node_id'][0] }}"
+  roles:
+    - role: postgres_repmgr
+      vars:
+        pgsqlrep_role: replica  
+        node_id: "{{ hostvars['localhost']['node_id'][0] }}"
+      when: groups['database_primary'] is defined
+
+
+#- import_playbook: awx-disable-repos.yml  

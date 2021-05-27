@@ -1,0 +1,158 @@
+- name: Install repmgr96
+  yum:
+    name: repmgr{{ repmgr_version }} 
+    state: "{{ repmgr_package_state  | default('present',true) }}"
+  when: ansible_distribution_major_version == '7'
+
+
+- name: "Copy repmgr.conf "
+  template:
+    src: repmgr.conf.j2
+    dest: "/etc/repmgr/9.6/repmgr.conf"
+    owner: "postgres"
+    group: "postgres"
+
+- name: "Copy sudoer.d for postgres"
+  template:
+    src: sudo-postgres.j2
+    dest: "/etc/sudoers.d/postgres"
+    owner: "root"
+    group: "root"
+    mode: 0440
+
+- name: create log directory
+  file:
+      path: "{{ postgres_repmgr_log_path }}"
+      state: directory
+      owner: postgres
+      group: postgres
+      mode: 0700
+
+- set_fact:
+    _masterdatabase: "{{ groups['database'][0] }}"
+
+- set_fact:
+    _repmgr_commands: "{{ postgres_repmgr_bin }} -h {{ _masterdatabase }} -U {{ repmgr_user }} -d {{ repmgr_database }}"
+# - name: "Register master node to repmgr"
+#   command: "{{ postgres_repmgr_bin }} primary register"
+#   become: yes
+#   become_user: "postgres"
+#   become_method: su
+#   ignore_errors: true
+#   when:
+#     - pgsqlrep_role is defined
+#     - pgsqlrep_role == 'master'
+
+- name: "register replica node to repmgr"
+  command: "{{ _repmgr_commands }} standby register --upstream-node-id {{ node_id }} -F"
+  become: yes
+  become_user: "postgres"
+  become_method: su
+  ignore_errors: true
+  when:
+    - pgsqlrep_role is defined
+    - pgsqlrep_role == 'replica'
+
+# - name: "follow replica node to master"
+#   command: "{{ _repmgr_commands }} standby follow --upstream-node-id {{ node_id }} -F"
+#   become: yes
+#   become_user: "postgres"
+#   become_method: su
+#   ignore_errors: true
+#   when:
+#     - pgsqlrep_role is defined
+#     - pgsqlrep_role == 'replica'
+
+# - name: restart postgres
+#   service:
+#     name: "{{ postgresql_service_name }}"
+#     state: restarted
+#   when:
+#     - pgsqlrep_role is defined
+#     - pgsqlrep_role == 'replica'
+
+- name: create run directory for 
+  file:
+      path: /run/repmgr
+      state: directory
+      owner: postgres
+      group: postgres
+
+# Moving to main.yml
+# - name: restart repmgr96.service
+#   service:
+#     name: "repmgr96.service"
+#     state: restarted
+#     enabled: true
+
+
+
+
+
+
+# - include_role:
+#     name:  postgresql
+#     tasks_from: users.yml
+#   when:
+#     - pgsqlrep_role is defined
+#     - pgsqlrep_role == 'master'
+
+# - name: "Copy postgreschk service to systemd"
+#   template:
+#     src: systemd-postgreschk.service.j2
+#     dest: "/usr/lib/systemd/system/postgreschk@.service"
+#     owner: "root"
+#     group: "root"
+#     mode: "0644"
+#   notify: restart postgreschk.socket
+
+# - name: "Copy postgreschk socket to systemd"
+#   template:
+#     src: systemd-postgreschk.socket.j2
+#     dest: "/usr/lib/systemd/system/postgreschk.socket"
+#     owner: "root"
+#     group: "root"
+#     mode: "0644"
+#   notify: restart postgreschk.socket
+
+# - name: "Copy postgreschk conf to usr/local/sbin"
+#   template:
+#     src: postgreschk.j2
+#     dest: "/usr/local/sbin/postgreschk"
+#     owner: "root"
+#     group: "root"
+#     mode: "0700"
+
+# - include_role:
+#     name:  postgresql
+#     tasks_from: users.yml
+#   when:
+#     - pgsqlrep_role is defined
+#     - pgsqlrep_role == 'master'
+
+# - include_role:
+#     name:  postgresql
+#     tasks_from: users_privileges.yml
+#   when:
+#     - pgsqlrep_role is defined
+#     - pgsqlrep_role == 'master'
+
+# - name: "PostgreSQL | Update credential"
+#   postgresql_user:
+#     db: "postgres"
+#     name: "{{ xinetd_monitor_username }}"
+#     password: "readonly"
+#     encrypted: no
+#   become: yes
+#   become_user: "postgres"
+#   become_method: su
+#   when:
+#     - pgsqlrep_role is defined
+#     - pgsqlrep_role == 'master'
+
+# - name: change postgres pg hba access
+#   lineinfile:
+#     path: "{{ postgresql_conf_directory }}/pg_hba.conf"
+#     regexp: "host  postgres  {{ xinetd_monitor_username }}  {{ inventory_hostname }}  md5"
+#     line: "host  postgres  {{ xinetd_monitor_username }}  {{ inventory_hostname }}  md5"
+#   notify: restart postgres

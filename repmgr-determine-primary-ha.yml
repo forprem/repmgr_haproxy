@@ -1,0 +1,52 @@
+- name: Determine Primary Server
+  hosts: awx
+
+  gather_facts: false
+  ignore_errors: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+
+  tasks:
+
+    - name: Check for primary in ha proxy
+      shell: "curl -u admin:password http://{{ inventory_hostname }}:1936/ | grep -E '<tr class=\"backup4\"><td class=ac>(.+?)</a>'"
+      retries: 5
+      delay: 5
+      register: replication_host
+      no_log: true
+
+
+    - name: Primary Server Info set in Fact
+      set_fact:
+        pgsqlrep_master: "{{ replication_host.stdout  | regex_search('<tr class=\"backup4\"><td class=ac><a name=\"awx_primary/(.+?)\"></a>', '\\1') }}"
+      when: 
+        - replication_host != ""
+        - replication_host | int == 0
+
+
+    - debug: 
+        var: pgsqlrep_master 
+      when: 
+        - pgsqlrep_master != ""
+        - replication_host | int == 0
+        #- not replication_host.stderr
+
+    - name: "Primay Host is {{ pgsqlrep_master }}"
+      debug:
+        msg: "Primary Host: {{ pgsqlrep_master }}"
+      when: 
+        - pgsqlrep_master != ""
+        - replication_host | int == 0
+        #- not replication_host.stderr
+
+
+
+    - name: Create master database group
+      add_host:
+        hostname: "{{ pgsqlrep_master[0] }}"
+        groups: database_primary
+      when: 
+        - pgsqlrep_master != ""
+        - replication_host | int == 0
+        #- not replication_host.stderr
+

@@ -1,0 +1,66 @@
+---
+
+#remove master database ssh connection to replica servers for postgres user
+- name: "Configure master ssh connection to replica server(s)"
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+   ansible_ssh_user: root
+  tasks:
+    - include_role:
+        name: ../roles/ssh_setup
+      vars:
+        - ssh_setup_source_host: "{{ groups['database'][0] | default([]) }}"
+        - ssh_setup_target_hosts: "{{ query('inventory_hostnames','database_replica:database:!database') }}"
+        - ssh_ssh_setup_action: remove
+
+
+#remove replica database ssh connection with master server
+- name: "Configure replica ssh connection to master"
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+   ansible_ssh_user: root
+  tasks:
+    - include_role:
+        name: ../roles/ssh_setup
+      vars:
+        - ssh_setup_source_host: "{{ main_item }}"
+        - ssh_setup_target_hosts: "{{ [groups['database'][0]] }}"
+        - ssh_ssh_setup_action: remove
+      loop: "{{ query('inventory_hostnames','database_replica:database:!database') }}"
+      loop_control:
+        loop_var: main_item
+
+
+#remove replica database ssh connection with replica1 to replica2 server
+- name: "Remove replica1 ssh connection to replica2"
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+   ansible_ssh_user: root
+  tasks:
+    - include_role:
+        name: ../roles/ssh_setup
+      vars:
+        - ssh_setup_source_host: "{{ groups['database_replica'][0] }}"
+        - ssh_setup_target_hosts: "{{ [groups['database_replica'][1]] }}"
+        - ssh_ssh_setup_action: remove
+
+#remove replica database ssh connection with replica2 to replica1 server
+- name: "Remove replica2 ssh connection to replica1"
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+   ansible_ssh_user: root
+  tasks:
+    - include_role:
+        name: ../roles/ssh_setup
+      vars:
+        - ssh_setup_source_host: "{{ groups['database_replica'][1] }}"
+        - ssh_setup_target_hosts: "{{ [groups['database_replica'][0]] }}"
+        - ssh_ssh_setup_action: remove

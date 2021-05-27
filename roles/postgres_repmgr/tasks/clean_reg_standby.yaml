@@ -1,0 +1,37 @@
+---
+
+- name: Clean up PostgreSQL data directory
+  become_user: postgres
+  file:
+    path: /var/lib/postgresql/{{ postgresql_version }}/main
+    force: yes
+    state: absent
+  when: role == "standby"
+
+- import_playbook: postgresql-determine-primary.yml
+
+- name: Clone primary node data
+  become_user: postgres
+  shell: "repmgr -h {{ database_primary }} -U {{ repmgr_user }} -d {{ repmgr_database }} standby clone"
+  ignore_errors: yes
+  when: role == "standby"
+
+- name: Start PostgreSQL
+  service:
+    name: "{{ postgresql_service_name }}"
+    state: started
+  when: role == "standby"
+ 
+
+- name: Register {{ role }} node
+  become_user: postgres
+  shell: repmgr {{ role }} register -F
+  ignore_errors: yes
+  when: role != "primary"
+
+- name: restart repmgr96.service
+  service:
+    name: "repmgr96.service"
+    state: restarted
+    enabled: true
+  ignore_errors: yes

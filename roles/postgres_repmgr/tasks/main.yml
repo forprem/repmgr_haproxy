@@ -1,0 +1,88 @@
+---
+# tasks file for repmgr
+
+#- import_playbook: postgresql-install.yml 
+
+# Collect RepMgr Variables
+- name: Gather variables for RepMgr
+  include_vars: "{{ item }}"
+  with_first_found:
+    - "../vars/repmgr.yml"
+ 
+- name: Run Postgres RepMgr configuration
+  include_tasks: pg_repmgr_config.yml
+  when:
+    - "'database' in group_names or 'database_replica' in group_names"
+
+- name: RepMgr configuration for hot_standby and shared lib
+  include_tasks: update_postgresql.yml
+  when:
+    - "'database' in group_names or 'database_replica' in group_names"
+
+
+# Role to update pg_hba file for RepMgr
+- include_role:
+    name:  postgresql
+    tasks_from: configure.yml
+  vars:
+    postgresql_bin_directory: "/usr/pgsql-{{ postgresql_version }}/bin"
+  when:
+    - "'database' in group_names or 'database_replica' in group_names"
+
+
+# Role to add repmgr user for RepMgr
+- include_role:
+    name:  postgresql
+    tasks_from: users.yml
+  when:
+    - "'database' in group_names or 'database_replica' in group_names"
+
+
+# Role to create databse for RepMgr
+- include_role:
+    name:  postgresql
+    tasks_from: databases.yml
+  when:
+    - "'database' in group_names or 'database_replica' in group_names"
+   
+
+# Role to add user privileges for RepMgr
+- include_role:
+    name:  postgresql
+    tasks_from: users_privileges.yml
+  when:
+    - "'database' in group_names or 'database_replica' in group_names"
+
+- name: Register Master to RepMgr
+  include_tasks: register_master.yml
+  when:
+    - "'database' in group_names"
+
+
+
+- name: restart postgres
+  service:
+    name: "{{ postgresql_service_name }}"
+    state: restarted
+  when:
+    - pgsqlrep_role is defined
+    - pgsqlrep_role == 'replica'    
+
+- name: Follow Replica to Master in RepMgr
+  include_tasks: replica_follow_master.yml
+  when:
+    - "'database_replica' in group_names"
+
+
+- name: restart repmgr96.service
+  service:
+    name: "repmgr96.service"
+    state: restarted
+    enabled: true
+
+
+
+
+
+
+

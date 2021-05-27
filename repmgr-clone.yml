@@ -1,0 +1,87 @@
+---
+- import_playbook: playbooks/postgresql_enable_ssh.yml
+- import_playbook: repmgr-determine-primary-ha-script.yml
+
+- name: "initiate cloning to {{ clone_target }} with primary {{ groups['database_primary'] [0] }}"
+  hosts: "{{ clone_target }}"
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  serial: 1
+  tasks:
+
+    # - name: "Verify if {{ clone_target }} is running in standby mode"
+    #   shell: "{{ postgres_repmgr_bin }} node check --role"
+    #   register: is_in_recovery
+    #   become: yes
+    #   become_user: "postgres"
+    #   become_method: su
+    #   changed_when: false
+
+    # - name: Fail when database is not in replication mode
+    #   fail:
+    #     msg: "{{ clone_target }} is not in replication mode and can't be cloned to master. Set force_database_clone=true to ignore this."
+    #   when:
+    #     - "'standby' not in is_in_recovery.stdout"
+    #     - not force_database_clone|default(false)|bool
+
+ 
+    # - name: Clean up PostgreSQL data directory
+    #   become_user: postgres
+    #   file:
+    #     path: /var/lib/postgresql/{{ postgresql_version }}/main
+    #     force: yes
+    #     state: absent
+    #   when:
+    #     - "'standby' in is_in_recovery.stdout"
+
+    - name: Stop PostgreSQL
+      service:
+        name: "{{ postgresql_service_name }}"
+        state: stopped
+      # when:
+      #   - "'standby' in is_in_recovery.stdout"    
+
+
+    - name: Clone Standby node from primary node data
+      shell: "{{ postgres_repmgr_bin }} -h {{ groups['database_primary'] [0] }} -U {{ repmgr_user }} -d {{ repmgr_database }} standby clone -F"
+      register: clone
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: clone.rc == 0
+
+    - name: Clone Info
+      debug:
+        msg: "Info about Cloning:  {{ clone.stderr }}"
+
+    - name: Start PostgreSQL
+      service:
+        name: "{{ postgresql_service_name }}"
+        state: started
+      # when:
+      #   - "'standby' in is_in_recovery.stdout"
+      
+
+    - name: "Register {{ clone_target }} node to RepMgr"
+      become: yes
+      become_user: postgres
+      become_method: su
+      #shell: "{{ postgres_repmgr_bin }} standby register -F"
+      shell: "{{ postgres_repmgr_bin }} -h {{ groups['database_primary'] [0] }} -U {{ repmgr_user }} -d {{ repmgr_database }} standby register -F"
+      ignore_errors: yes
+      # when:
+      #   - "'standby' in is_in_recovery.stdout"
+
+    - name: restart repmgr96.service
+      service:
+        name: "repmgr96.service"
+        state: restarted
+        enabled: true
+      ignore_errors: yes
+
+
+
+#- import_playbook: playbooks/postgresql_disable_ssh.yml
+

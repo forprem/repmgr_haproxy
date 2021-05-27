@@ -1,0 +1,98 @@
+---
+- import_playbook: playbooks/postgresql_enable_ssh.yml
+- import_playbook: repmgr-determine-primary-ha-script.yml
+
+- name: "initiate Recovery to {{ recovery_target }} with primary {{ groups['database_primary'] [0] }}"
+  hosts: "{{ recovery_target }}"
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  serial: 1
+  tasks:
+
+    - name: "Verify if its having backup in {{ recovery_target }} and OK"
+      shell: "pgbackrest info"
+      register: is_in_recovery
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: Backup info with pgbackrest
+      debug:
+        msg: "{{ recovery_target }} is having {{ is_in_recovery.stdout }}"
+
+
+    - name: Fail when database is not having any backup
+      fail:
+        msg: "{{ recovery_target }} is not having any backup."
+      when:
+        - "'status: ok' not in is_in_recovery.stdout"
+
+ 
+    # - name: Clean up PostgreSQL data directory
+    #   become_user: postgres
+    #   file:
+    #     path: /var/lib/postgresql/{{ postgresql_version }}/main
+    #     force: yes
+    #     state: absent
+    #   when:
+    #     - "'standby' in is_in_recovery.stdout"
+
+    - name: Stop PostgreSQL
+      service:
+        name: "{{ postgresql_service_name }}"
+        state: stopped
+
+
+    - name: Remove replication slots {{ bcp_slot }} on master
+      shell: psql -c "SELECT pg_drop_replication_slot('{{ bcp_slot }}');"
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      delegate_to: "{{ groups['database_primary'] [0] }}"
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Execute Data Recovery as Delta
+      shell: "pgbackrest --stanza=awx restore --delta;"
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false  
+
+
+    - name: Start PostgreSQL
+      service:
+        name: "{{ postgresql_service_name }}"
+        state: started
+      
+
+    - name: "RepMgr Standby Follow"
+      command: "{{ postgres_repmgr_bin }} standby follow  -F"
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+      ignore_errors: true
+
+# In case of testing if new recovery server has timeline ahead of primary then execute pg rewind command
+    - name: Stop PostgreSQL
+      service:
+        name: "{{ postgresql_service_name }}"
+        state: stopped
+
+    - name: Recovery server in standby mode forece rewind
+      shell: "{{ postgres_repmgr_bin }} node rejoin --force-rewind --verbose -d 'host= {{ groups['database_primary'] [0] }}  user=repmgr dbname=repmgr connect_timeout=2'"
+      retries: 5
+      delay: 5
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+
+
+#- import_playbook: playbooks/postgresql_disable_ssh.yml
+

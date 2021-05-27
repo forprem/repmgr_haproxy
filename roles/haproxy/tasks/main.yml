@@ -1,0 +1,17 @@
+---
+# tasks file for grafana
+
+- name: Gather variables for HA Proxy
+  include_vars: "{{ item }}"
+  with_first_found:
+    - "../vars/haproxy.yml"
+  
+- name: Run Postgres configuration
+  include_tasks: postgres.yml
+  when:
+    - "'database' in group_names or 'database_replica' in group_names"
+
+- name: Run AWX configuration on primary node
+  include_tasks: awx.yml
+  when:
+    - "'awx' in group_names"    

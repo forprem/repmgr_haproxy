@@ -1,0 +1,14 @@
+- set_fact:
+    _masterdatabase: "{{ groups['database'][0] }}"
+
+- set_fact:
+    _repmgr_commands: "{{ postgres_repmgr_bin }} -h {{ _masterdatabase }} -U {{ repmgr_user }} -d {{ repmgr_database }}"
+- name: "Register master node to repmgr"
+  command: "{{ postgres_repmgr_bin }} primary register"
+  become: yes
+  become_user: "postgres"
+  become_method: su
+  ignore_errors: true
+  when:
+    - pgsqlrep_role is defined
+    - pgsqlrep_role == 'master'

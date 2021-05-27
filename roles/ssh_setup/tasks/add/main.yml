@@ -1,0 +1,23 @@
+---
+# tasks file for roles/ssh_setup
+
+- name: "Perform pre-check"
+  include_tasks: pre_check.yml
+  tags: "ssh_setup_pre_check"
+
+- name: "Source host"
+  debug:
+    var: ssh_setup_source_host
+
+- name: "Target host(s)"
+  debug:
+    var: ssh_setup_target_hosts
+
+- name: "Configure source host"
+  include_tasks: configure_source_host.yml
+  tags: "ssh_setup_source_host"
+
+- name: "Configure target hosts"
+  include_tasks: configure_target_hosts.yml
+  loop: "{{ ssh_setup_target_hosts }}"
+  tags: "ssh_setup_target_host"

@@ -1,0 +1,55 @@
+- name: Determine Primary Server
+  hosts: database:database_replica
+
+  gather_facts: false
+  ignore_errors: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+  serial: 1
+  tasks:
+
+    - name: Check for primary in ha proxy
+      shell: /usr/local/sbin/postgreschk
+      retries: 5
+      delay: 5
+      register: replication_host
+      no_log: true
+      changed_when: false
+
+    # - debug:
+    #     var: replication_host.stdout
+
+
+    - name: Primary Server Info set in Fact
+      set_fact:
+        pgsqlrep_master: "{{ inventory_hostname }}"
+      when: 
+        - "'Master' in replication_host.stdout"
+
+
+    - debug: 
+        var: pgsqlrep_master 
+      when: 
+        - "'Master' in replication_host.stdout"
+
+
+    - name: "Primay Host is {{ pgsqlrep_master }}"
+      debug:
+        msg: "Primary Host: {{ pgsqlrep_master }}"
+      when: 
+        - "'Master' in replication_host.stdout"
+
+
+
+    - name: Create master database group
+      add_host:
+        hostname: "{{ pgsqlrep_master }}"
+        groups: database_primary
+      when: 
+        - "'Master' in replication_host.stdout"
+
+    - name: "Primay Host {{ groups['database_primary'] }}"
+      debug:
+        msg: "Primary Host: {{ groups['database_primary'] }}"
+      when: 
+        - "'Master' in replication_host.stdout"

@@ -1,0 +1,10 @@
+postgresql_service_name: "postgresql-{{ postgresql_version }}"
+repmgr_user: 'repmgr'
+repmgr_database: 'repmgr'
+postgres_repmgr_bin: "/usr/pgsql-{{ postgresql_version }}/bin/repmgr"
+postgres_repmgrd_bin: "/usr/pgsql-{{ postgresql_version }}/bin/repmgrd"
+postgres_data: "/etc/postgresql/{{ postgresql_version }}/data/"
+postgres_repmgr_conf: "/etc/repmgr/{{ postgresql_version }}/repmgr.conf"
+postgres_repmgr_log_path: "/var/log/postgresql"
+repmgr_version: "96"
+repmgr_package_state: "present"

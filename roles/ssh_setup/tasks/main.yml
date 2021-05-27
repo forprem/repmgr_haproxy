@@ -1,0 +1,8 @@
+---
+
+- include_tasks: "add/main.yml"
+  when: "ssh_ssh_setup_action == 'add'"
+
+
+- include_tasks: "remove/main.yml"
+  when: "ssh_ssh_setup_action == 'remove'"

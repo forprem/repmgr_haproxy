@@ -1,0 +1,67 @@
+- import_playbook: awx-enable-repos.yml
+
+- import_playbook: repmgr-determine-primary-ha-script.yml
+  ignore_errors: yes
+
+- name: RepMgr Verification
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+  tasks:
+
+    - name: Validate if RepMgr already exists
+      fail:
+        msg: "RepMgr Cluster already exists no need to install it again. Run upgrade posgres_repmgr_upgrade.yml"
+      when: groups['database_primary'] is defined
+
+
+- hosts: database
+  gather_facts: true
+  any_errors_fatal: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgresql/defaults/main.yml
+  roles:
+    - role: postgres_repmgr
+      vars:
+        pgsqlrep_role: master
+        node_id: 1
+      when: groups['database_primary'] is not defined
+
+
+- hosts: database_replica
+  gather_facts: true
+  any_errors_fatal: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgresql/defaults/main.yml
+  roles:
+    - role: postgres_repmgr
+      vars:
+        pgsqlrep_role: replica  
+        node_id: 1
+      when: groups['database_primary'] is not defined
+
+# Setup HA Proxy
+- import_playbook: database-ha.yml
+
+
+# Setup pgbackrest for Master 
+- name: Configure pgbackrest service on master database
+  import_playbook: pgbackrest-install.yml
+  when: 
+  - run_pgbackrest | default(true,true) | bool
+  - groups['database_primary'] is not defined
+
+- name: Backup master database
+  import_playbook: pgbackrest-backup-diff.yml
+  when:
+  - run_pgbackrest | default(true,true) | bool
+  - pgsqlrep_replication_backup | bool
+  - groups['database_primary'] is not defined
+# pgbackrest end
+
+# Disable Repos
+- import_playbook: awx-disable-repos.yml  

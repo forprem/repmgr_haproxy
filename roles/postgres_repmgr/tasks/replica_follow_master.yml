@@ -1,0 +1,30 @@
+- set_fact:
+    _masterdatabase: "{{ groups['database'][0] }}"
+
+- set_fact:
+    _repmgr_commands: "{{ postgres_repmgr_bin }} -h {{ _masterdatabase }} -U {{ repmgr_user }} -d {{ repmgr_database }}"
+- name: "follow replica node to master"
+  command: "{{ _repmgr_commands }} standby follow --upstream-node-id {{ node_id }} -F"
+  become: yes
+  become_user: "postgres"
+  become_method: su
+  ignore_errors: true
+  when:
+    - pgsqlrep_role is defined
+    - pgsqlrep_role == 'replica'
+
+- name: restart postgres
+  service:
+    name: "{{ postgresql_service_name }}"
+    state: restarted
+  when:
+    - pgsqlrep_role is defined
+    - pgsqlrep_role == 'replica'
+
+- name: create run directory for 
+  file:
+      path: /run/repmgr
+      state: directory
+      owner: postgres
+      group: postgres
+      

@@ -1,0 +1,47 @@
+---
+- name: "Read RSA pub key | {{ ssh_setup_source_host }}"
+  slurp:
+    src: "{{ ssh_setup_ssh_dir }}/{{ ssh_setup_ssh_key_name }}.pub"
+  register: ssh_setup_pub_key_content
+  no_log: True
+  become: yes
+  become_method: "{{ ssh_setup_default_become_method }}"
+  become_user: "{{ ssh_setup_user }}"
+  delegate_to: "{{ ssh_setup_source_host }}"
+
+- name: "Distribute RSA pub key to target hosts | {{ item }}"
+  authorized_key:
+    user: "{{ ssh_setup_user }}"
+    path: "{{ ssh_setup_ssh_auth_key_path }}"
+    state: present
+    manage_dir: False
+    comment: "{{ ssh_setup_source_host }}"
+    key: "{{ ssh_setup_pub_key_content.content | b64decode | string }}"
+    
+  no_log: False
+  delegate_to: "{{ item }}"
+
+- name: Add {{ ssh_setup_user }} to /etc/security/access-ssh.conf | {{ item }}
+  lineinfile:
+    path: "/etc/security/access-ssh.conf"
+    line: "{{ ssh_setup_user }}"
+    state: present
+  become: yes
+  delegate_to: "{{ item }}"
+
+- name: Remove {{ ssh_setup_user }} from /etc/restricted_accounts | {{ item }}
+  lineinfile:
+    path: "/etc/restricted_accounts"
+    line: "{{ ssh_setup_user }}"
+    state: absent
+  become: yes
+  delegate_to: "{{ item }}"
+
+- name: "Add {{ item }} to known_host of {{ ssh_setup_source_host }}"
+  known_hosts:
+    name: "{{ item }}"
+    key: "{{ lookup('pipe', 'ssh-keyscan ' + item + ',`dig +short ' + item + '`') }}"
+  become: yes
+  become_method: "{{ ssh_setup_default_become_method }}"
+  become_user: "{{ ssh_setup_user }}"
+  delegate_to: "{{ ssh_setup_source_host }}"

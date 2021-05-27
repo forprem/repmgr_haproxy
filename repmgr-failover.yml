@@ -1,0 +1,169 @@
+---
+
+- import_playbook: repmgr-determine-primary-ha-script.yml
+
+- name: initiate failover to "{{ failover_target }}"
+  hosts: "{{ failover_target }}"
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  serial: 1
+  tasks:
+
+    - name: "Verify if {{ failover_target }} is running in standby mode"
+      shell: "{{ postgres_repmgr_bin }} node check --role"
+      register: is_in_recovery
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: Fail when database is not running in replication mode
+      fail:
+        msg: "{{ failover_target }} is not running in replication mode or already master. Set force_database_failover=true to ignore this."
+      when:
+        - "'standby' not in is_in_recovery.stdout"
+        - not force_database_failover|default(false)|bool
+
+    - name: Pause Repmgr Service for stopping automatic failover
+      shell: "{{ postgres_repmgr_bin }} service pause"
+      register: is_in_pause
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false  
+      
+
+    - name: shutdown {{ groups['database_primary'] [0] }}
+      service:
+        name: "postgresql-9.6"
+        state: stopped
+        enabled: yes
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['database_primary'] }}"
+
+    - name: "Verify if {{ failover_target }} is running in standby mode"
+      shell: "{{ postgres_repmgr_bin }} node check --role"
+      register: is_in_recovery
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false      
+
+
+    - name:
+      block:
+
+      - name: "Promote {{ failover_target }} to Master role, if in standby mode"
+        shell: "{{ postgres_repmgr_bin }} standby promote"
+        register: is_promoted
+        become: yes
+        become_user: "postgres"
+        become_method: su
+        changed_when: false
+
+# Note: If repmgr detects a situation where it needs to execute pg_rewind, it will execute a CHECKPOINT on the new primary before executing pg_rewind
+
+      #Perform a manual checkpoint on the new promoted master
+      # - name: "Perform a Checkpoint on the promoted database server"
+      #   command: psql -x -c 'CHECKPOINT;'
+      #   become: yes
+      #   become_user: "postgres"
+      #   become_method: su
+
+
+      when:
+        - "'node is standby' in is_in_recovery.stdout"
+        -  is_in_recovery.rc == 0
+
+
+
+    - name: Start Old Primary {{ groups['database_primary'] [0] }}
+      service:
+        name: "postgresql-9.6"
+        state: stopped
+        enabled: yes
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['database_primary'] }}"
+      
+
+    - name: shutdown replica databases
+      service:
+        name: "postgresql-9.6"
+        state: stopped
+        enabled: yes
+      delegate_to: "{{ item }}"
+      loop: "{{ (groups['database'] | default([]) + groups['database_replica'] | default([])) | difference(failover_target) }}"
+      when:
+        - "'promoted to primary' in is_promoted.stdout"
+
+
+
+- name: Rejoin other servers as standby
+  hosts: "database_replica:database:!{{ failover_target }}"
+  serial: 1
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  tasks:
+
+    - name: shutdown replica databases
+      service:
+        name: "postgresql-9.6"
+        state: stopped
+        enabled: yes
+
+    - name: "Make sure other server joined in standby mode"
+      shell: "{{ postgres_repmgr_bin }} node rejoin --force-rewind --verbose -d 'host= {{ failover_target }} user=repmgr dbname=repmgr connect_timeout=2'"
+      retries: 5
+      delay: 5
+      register: is_promoted
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+
+- name: Unpause RepMgr Services
+  hosts: "{{ failover_target }}"
+  serial: 1
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  tasks:
+
+    - name: Unpause Repmgr Service for starting automatic failover
+      shell: "{{ postgres_repmgr_bin }} service unpause"
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false 
+
+
+
+
+# *********** AWX Service Status **********
+- name: AWX Service Status
+  hosts: awx:awx_bcp
+  become: yes
+  tasks:
+
+    - name: Check the status of AWX list of services
+      shell: systemctl list-units|grep "{{ item }}"|awk '{ print $1,$2,$3,$4}'
+      with_items:
+        - supervisord
+        - nginx
+        - haproxy
+        - rh-redis5-redis
+      register: service_status
+      changed_when: false
+
+    - name: Display AWX services status
+      debug:
+        msg: "{{ item.stdout }}"
+      with_items: "{{ service_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"

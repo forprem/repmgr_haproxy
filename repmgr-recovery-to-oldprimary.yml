@@ -1,0 +1,4 @@
+---
+- import_playbook: repmgr-recovery.yml
+  vars:
+    clone_target: "{{ groups['database_replica'][1] }}"

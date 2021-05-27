@@ -1,0 +1,86 @@
+---
+- import_playbook: playbooks/postgresql_enable_ssh.yml
+
+- name: initiate failover to "{{ failover_target }}"
+  hosts: "{{ failover_target }}"
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  serial: 1
+  tasks:
+
+    - name: "Verify if {{ failover_target }} is running in standby mode"
+      shell: "{{ postgres_repmgr_bin }} node check --role"
+      register: is_in_recovery
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: Fail when database is not running in replication mode
+      fail:
+        msg: "{{ failover_target }} is not running in replication mode or already master. Set force_database_failover=true to ignore this."
+      when:
+        - "'standby' not in is_in_recovery.stdout"
+        - not force_database_failover|default(false)|bool
+
+    - name: Switchover Standby to Primary
+      shell: "{{ postgres_repmgr_bin }} standby switchover --always-promote --force-rewind --siblings-follow -F"
+      register: is_in_pause
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false  
+      
+#Setup pgbackrest for Master 
+- name: Configure pgbackrest service on master database
+  import_playbook: pgbackrest-install.yml
+  when: run_pgbackrest | default(true,true) | bool
+
+- name: Backup master database
+  import_playbook: pgbackrest-backup-diff.yml
+  when:
+  - run_pgbackrest | default(true,true) | bool
+  - pgsqlrep_replication_backup | bool
+
+# - name: Update pgbackrest for Master
+#   hosts: "{{ failover_target }}"
+#   vars_files:
+#     - secret_vars/{{ environ }}.yml
+#   vars:
+#     pgbackrest_install: true
+#     pgbackrest_backup_type: "diff"
+#   become: yes
+#   tasks:
+#     - include_role:
+#         name: pgbackrest
+#         tasks_from: master
+
+
+
+# *********** AWX Service Status **********
+- name: AWX Service Status
+  hosts: awx:awx_bcp
+  become: yes
+  tasks:
+
+    - name: Check the status of AWX list of services
+      shell: systemctl list-units|grep "{{ item }}"|awk '{ print $1,$2,$3,$4}'
+      with_items:
+        - supervisord
+        - nginx
+        - haproxy
+        - rh-redis5-redis
+      register: service_status
+      changed_when: false
+
+    - name: Display AWX services status
+      debug:
+        msg: "{{ item.stdout }}"
+      with_items: "{{ service_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+
+#- import_playbook: playbooks/postgresql_disable_ssh.yml

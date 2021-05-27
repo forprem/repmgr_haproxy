@@ -1,0 +1,147 @@
+---
+
+- import_playbook: repmgr-determine-primary-ha-script.yml
+
+- name: Backup in Master
+  hosts: "{{ groups['database_primary'] }}"
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+  become: yes
+  tasks:
+    - name: "Verify if its having backup in Primary {{ groups['database_primary'] }}"
+      shell: "pgbackrest info"
+      register: is_in_recovery
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: Backup info with pgbackrest
+      debug:
+        msg: "{{ groups['database_primary'] }} is having {{ is_in_recovery.stdout }}"
+       
+
+- name: Changes in DB Cluster Primary "{{ groups['database_primary'] [0] }}"
+  hosts: "{{ groups['database_primary'] }}"
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  serial: 1
+  tasks:
+
+#----------------Inactive Replication Slots -----------------#
+
+    - name: show inactive replication slots on master
+      shell: psql -c "SELECT slot_name FROM pg_replication_slots where active = 'f';"
+      register: inactive_slots
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: Get replication slot list from master
+      set_fact:
+        server_slot_list:  "{{ inactive_slots.stdout | regex_findall('[^\\s-]+com')   }}"
+      when: inactive_slots.stdout_lines is defined
+
+    - debug:
+        msg: "{{ server_slot_list }}"
+      when: server_slot_list | length > 0
+
+#----------- Remove Inactive Replication Slots --------------#
+
+    - name: "Remove replication slot {{ server_slot_list }} "
+      postgresql_query:
+        query: "SELECT pg_drop_replication_slot(%s)"
+        positional_args:
+          - "{{ item }}"
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      with_items: "{{ server_slot_list }}"
+      when: server_slot_list is iterable    
+
+# ***********  DB Service Status   **********
+    - name: Check the status of DB list of services
+      shell: systemctl list-units|grep "{{ item }}"|awk '{ print $1,$2,$3,$4}'
+      with_items:
+        - postgreschk.socket
+        - repmgr96
+        - postgresql-9.6
+      register: service_status
+      changed_when: false
+
+    - name: Display DB services status
+      debug:
+        msg: "{{ item.stdout }}"
+      with_items: "{{ service_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"   
+
+
+# *********** AWX Points to local host on 5432 Port for HA Proxy **********
+- name: Update Ansible AWX Tower database configuration
+  hosts: awx:awx_bcp
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+  vars:
+    pg_host: "127.0.0.1"
+    pg_port: "5432"
+  become: yes
+  tasks:
+    - include_role:
+        name: awx_config
+        tasks_from: awx_update_settings
+    - include_role:
+        name: awx_config
+        tasks_from: awx_set_channel_conf.yml
+# *********** HA  Port End **********
+
+    - name: Check the status of AWX list of services
+      shell: systemctl list-units|grep "{{ item }}"|awk '{ print $1,$2,$3,$4}'
+      with_items:
+        - supervisord
+        - nginx
+        - haproxy
+        - rh-redis5-redis
+      register: service_status
+      changed_when: false
+
+    - name: Display AWX services status
+      debug:
+        msg: "{{ item.stdout }}"
+      with_items: "{{ service_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+# *********** Stop BCP Server **********
+- name: Verify AWX BCP server Stopped in case BCP DB is not Master
+  hosts: awx_bcp
+  become: yes
+  tasks:
+
+    - name: Get the node_id for primary server "{{ groups['database_primary'][0] }}"
+      shell: psql repmgr -c "select node_id from repmgr.nodes where node_name='{{ groups['database_primary'][0] }}';"
+      register: node_info
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      delegate_to: "{{ groups['database_primary'][0] }}"
+      changed_when: false
+
+    - name: Set Fact for node_id
+      set_fact:
+        node_id:  "{{ node_info.stdout | regex_search('-\\s*(\\d)', '\\1') | trim   }}"
+      when: node_info.stdout_lines is defined
+
+    - debug:
+        msg: "{{ node_id }}"
+      when: node_id | length > 0
+
+    - name: Make Sure supervisord stopped for BCP Server
+      service:
+        name: "supervisord"
+        state: stopped
+        enabled: yes
+      when: node_id != 3

@@ -1,0 +1,28 @@
+---
+#handlers file for grafana
+
+- name: restart postgreschk.socket
+  service:
+    name: "postgreschk.socket"
+    state: restarted
+    enabled: True
+    daemon_reload: yes
+
+- name: restart postgres
+  service:
+    name: "{{ postgresql_service_name }}"
+    state: restarted
+
+- name: restart journal
+  service:
+    name: "systemd-journald"
+    state: restarted
+
+- name: restart haproxy
+  service:
+    name: "haproxy"
+    state: restarted
+  register: haproxy_restart_app
+  retries: 5
+  delay: 2
+  until: haproxy_restart_app is success    

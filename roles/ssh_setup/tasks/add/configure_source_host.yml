@@ -1,0 +1,54 @@
+---
+# This task file is responsible to configure 'ssh_setup_source_host'
+# for ssh connectivity to 'ssh_setup_target_hosts'
+
+- name: "Check for .ssh directory | {{ ssh_setup_source_host }}"
+  stat:
+    path: "{{ ssh_setup_ssh_dir }}"
+  become: yes
+  become_user: "{{ ssh_setup_user }}"
+  become_method: "{{ ssh_setup_default_become_method }}"
+  register: ssh_setup_ssh_dir_stat
+  delegate_to: "{{ ssh_setup_source_host }}"
+
+- name: "Create .ssh directory | {{ ssh_setup_source_host }}"
+  file:
+    path: "{{ ssh_setup_ssh_dir }}"
+    state: directory
+  become: yes
+  become_user: "{{ ssh_setup_user }}"
+  become_method: "{{ ssh_setup_default_become_method }}"
+  when: not ssh_setup_ssh_dir_stat.stat.exists
+  delegate_to: "{{ ssh_setup_source_host }}"
+
+- name: "Create RSA pair | {{ ssh_setup_source_host }}"
+  openssh_keypair:
+    path: "{{ ssh_setup_ssh_dir }}/{{ ssh_setup_ssh_key_name }}"
+    mode: 0600
+    owner: "{{ ssh_setup_user }}"
+  become: yes
+  become_method: "{{ ssh_setup_default_become_method }}"
+  become_user: "{{ ssh_setup_user }}"
+  delegate_to: "{{ ssh_setup_source_host }}"
+
+- name: "Create known_hosts file"
+  block:
+  - name: Check if known_hosts file exists
+    stat:
+      path: "{{ ssh_setup_ssh_dir }}/known_hosts"
+    become: yes
+    become_method: "{{ ssh_setup_default_become_method }}"
+    become_user: "{{ ssh_setup_user }}"
+    register: ssh_setup_known_hosts_file
+
+  - name: Create known hosts file
+    file:
+      path: "{{ ssh_setup_ssh_dir }}/known_hosts"
+      state: touch
+      mode: 0644
+    become: yes
+    become_method: "{{ ssh_setup_default_become_method }}"
+    become_user: "{{ ssh_setup_user }}"
+    when: not ssh_setup_known_hosts_file.stat.exists
+  when: ssh_setup_known_hosts | bool
+  delegate_to: "{{ ssh_setup_source_host }}"

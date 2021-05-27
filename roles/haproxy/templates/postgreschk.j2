@@ -1,0 +1,130 @@
+#!/bin/bash
+#
+# This script checks if a PostgreSQL server is healthy running on localhost. It will
+# return:
+# "HTTP/1.x 200 OK\r" (if postgres is running smoothly)
+# - OR -
+# "HTTP/1.x 500 Internal Server Error\r" (else)
+#
+# The purpose of this script is make haproxy capable of monitoring PostgreSQL properly
+#
+ 
+export PGHOST='{{ inventory_hostname }}'
+#export PGUSER='{{ xinetd_monitor_username }}'
+export PGUSER='repmgr'
+export PGPASSWORD='readonly'
+export PGPORT='5432'
+export PGDATABASE='postgres'
+export PGCONNECT_TIMEOUT=10
+ 
+FORCE_FAIL="/dev/shm/proxyoff"
+ 
+MASTER_CHECK="SELECT pg_is_in_recovery()"
+SLAVE_CHECK="select active, type from repmgr.nodes where node_name='{{ inventory_hostname }}'"
+SB_CHECK="select count(*) from repmgr.replication_status where node_type='standby'"
+WRITABLE_CHECK="SHOW transaction_read_only"
+BCP_SB="select node_id from repmgr.nodes where node_name='{{ inventory_hostname }}' and active='f' and type='standby';"
+
+ 
+return_ok()
+{
+    echo -e "HTTP/1.1 200 OK\r\n"
+    echo -e "Content-Type: text/html\r\n"
+    if [ "$1x" == "masterx" ]; then
+        echo -e "Content-Length: 56\r\n"
+        echo -e "\r\n"
+        echo -e "<html><body>PostgreSQL is running Master.</body></html>\r\n"
+    elif [ "$1x" == "slavex" ]; then
+        echo -e "Content-Length: 55\r\n"
+        echo -e "\r\n"
+        echo -e "<html><body>PostgreSQL is running Slave.</body></html>\r\n"
+    elif [ "$1x" == "splitbrainx" ]; then
+        echo -e "Content-Length: 55\r\n"
+        echo -e "\r\n"
+        echo -e "<html><body>PostgreSQL splitbrain Issue.</body></html>\r\n"
+    else
+        echo -e "Content-Length: 49\r\n"
+        echo -e "\r\n"
+        echo -e "<html><body>PostgreSQL is running.</body></html>\r\n"
+    fi
+    echo -e "\r\n"
+ 
+    unset PGUSER
+    unset PGPASSWORD
+    exit 0
+}
+ 
+return_fail()
+{
+    echo -e "HTTP/1.1 503 Service Unavailable\r\n"
+    echo -e "Content-Type: text/html\r\n"
+    echo -e "Content-Length: 48\r\n"
+    echo -e "\r\n"
+    echo -e "<html><body>PostgreSQL is *down*.</body></html>\r\n"
+    echo -e "\r\n"
+ 
+    unset PGUSER
+    unset PGPASSWORD
+    exit 1
+}
+ 
+if [ -f "$FORCE_FAIL" ]; then
+    return_fail;
+fi
+ 
+# check if in standby mode (that means it is a 'slave')
+SLAVE=$(psql repmgr -qt -c "$SLAVE_CHECK" 2>/dev/null)
+if [ $? -ne 0 ]; then
+    return_fail;
+elif echo $SLAVE | egrep standby  2>/dev/null >/dev/null; then
+    return_ok "slave"
+fi
+
+# check if in SplitBrain
+SplitBrain=$(su - postgres -c "/usr/pgsql-9.6/bin/repmgr -qt -c cluster show | grep -i '! running as primary'" 2>/dev/null)
+if echo $SplitBrain | grep -i '! running as primary' 2>/dev/:null >/dev/null ; then
+    return_ok "splitbrain";
+fi
+
+
+# check if in primary mode or in splitbrain
+NODECHECK=$(su - postgres -c "/usr/pgsql-9.6/bin/repmgr -qt -c cluster show | grep -i '! running'" 2>/dev/null)
+
+if  [ -z "$NODECHECK"] 2>/dev/:null >/dev/null; then
+     if echo $SLAVE | grep -o primary 2>/dev/:null >/dev/null; then
+        return_ok "master"
+     fi
+elif [ $BCP_SB -eq 3 ] 2>/dev/:null >/dev/null; then
+     reurn_ok "slave"
+fi
+
+SPLIT=$(psql repmgr -qt -c "$SB_CHECK" 2>/dev/null)
+
+#if [ $? -ne 0 ]; then
+#    return_fail;
+if echo $NODECHECK | egrep standby  2>/dev/:null >/dev/null ; then
+    if [ $SPLIT -eq 2 ]; then
+        if [ $BCP_SB -eq 3 ] 2>/dev/:null >/dev/null; then
+            return_ok "master"
+        else
+            return_ok "splitbrain"
+        fi
+    else
+        return_ok "slave"
+    fi
+elif echo $SLAVE | grep -o primary 2>/dev/:null >/dev/null; then
+    return_ok "master"
+fi
+
+
+# check if in primary mode (that means it is a 'master')
+SLAVE=$(psql repmgr -qt -c "$SLAVE_CHECK" 2>/dev/null)
+if [ $? -ne 0 ]; then
+    return_fail;
+elif echo $SLAVE | egrep primary  2>/dev/null >/dev/null; then
+    return_ok "master"
+fi
+
+
+return_ok "none";
+exit

@@ -1,0 +1,37 @@
+---
+
+- import_playbook: ../postgresql-determine-primary.yml
+
+
+- hosts: "database_replica"
+  gather_facts: true
+  any_errors_fatal: true
+  become: yes
+  become_method: "{{ default_become_method }}"
+  become_user: root
+  vars_files:
+    - "secret_vars/{{ environ }}.yml"
+  vars:
+    pgsqlrep_role: "replica"
+  tasks:
+    - name: "Stop Postgres"
+      command: "repmgr node service --action=stop --checkpoint"
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      ignore_errors: true
+      when:
+        - pgsqlrep_role is defined
+        - pgsqlrep_role == 'replica'
+
+    - name: "Rejoin to Master"
+      command: "repmgr -d 'database_primary user=repmgr dbname=repmgr' node rejoin --force-rewind"
+      retries: 3
+      delay: 5
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      ignore_errors: true
+      when:
+        - pgsqlrep_role is defined
+        - pgsqlrep_role == 'replica'

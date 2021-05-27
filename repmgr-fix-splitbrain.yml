@@ -1,0 +1,93 @@
+---
+- import_playbook: repmgr-determine-primary-ha-script.yml
+
+- name: RepMgr Verification
+  hosts: localhost
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+  tasks:
+
+    - name: Validate if RepMgr already exists
+      fail:
+        msg: "RepMgr Cluster is not avialable or primary is not avialable"
+      when: groups['database_primary'] is not defined
+
+- name: Identify SplitBrain Server in RepMgr Cluster"
+  hosts: "{{ groups['database_primary'] }}"
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  serial: 1
+  tasks:
+
+    - name: Identify Old Inactive Primary server in Replication Cluter
+      shell: "{{ postgres_repmgr_bin }} service status | grep '! running'"
+      register: is_in_splitbrainhost
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: Fail when Cluster is not having SplitBrain host
+      fail:
+        msg: "RepMgr Cluster is not having any SplitBrain Host."
+      when:
+        - "'primary' not in is_in_splitbrainhost.stdout"
+
+
+
+    - name: SplitBrain Host Info set in Fact
+      set_fact:
+        splitbrain_host: "{{ is_in_splitbrainhost.stdout  | regex_search('\\|(.+?)\\|', '\\1') | trim | replace(' ','') }}"
+
+    - debug: 
+        var: splitbrain_host 
+
+
+    - name: add splitbrain host variables to host
+      add_host:
+        name: "hostname_fix"
+        splitbrain_host:  "{{ splitbrain_host }}"        
+
+
+    - name: Make Sure Splitbrain databases is stopped
+      service:
+        name: "postgresql-9.6"
+        state: stopped
+        enabled: yes
+      delegate_to: "{{ splitbrain_host[0] }}"
+      when:
+        - "'primary' in is_in_splitbrainhost.stdout"
+
+# ***********  Join SplitBrain Server   **********
+    - name: "Join Splitbrain server in standby mode"
+      shell: "{{ postgres_repmgr_bin }} node rejoin --force-rewind --verbose -d 'host= {{ groups['database_primary'] [0] }}  user=repmgr dbname=repmgr connect_timeout=2'"
+      retries: 5
+      delay: 5
+      register: is_joined
+      delegate_to: "{{ splitbrain_host[0] }}"
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+# ***********  DB Service Status   **********
+    - name: Check the status of DB list of services
+      shell: systemctl list-units|grep "{{ item }}"|awk '{ print $1,$2,$3,$4}'
+      with_items:
+        - postgreschk.socket
+        - repmgr96
+        - postgresql-9.6
+      register: service_status
+      changed_when: false
+
+    - name: Display DB services status
+      debug:
+        msg: "{{ item.stdout }}"
+      with_items: "{{ service_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+
+

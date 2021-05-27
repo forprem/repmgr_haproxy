@@ -1,0 +1,108 @@
+- name: Determine Primary Server
+  hosts: database_replica:database
+
+  gather_facts: false
+  ignore_errors: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  #serial: 1
+  tasks:
+
+    - name: check for service status
+      shell: systemctl status postgresql-9.6
+      ignore_errors: true
+      register: pgstatus
+      no_log: yes
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: Show service service status
+      debug:
+        msg: 'postgresql-9.6 exists.'
+      when: pgstatus.rc | int == 0
+
+    - name: Check for primary in Replication Cluter
+      shell: "{{ postgres_repmgr_bin }} service status | grep '* running'"
+      register: replication_host
+      ignore_errors: yes
+      no_log: yes
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+      when: pgstatus.rc | int == 0
+
+
+    - name: Replication Info set in Fact
+      set_fact:
+        pgsqlrep_master: "{{ replication_host.stdout  | regex_search('\\|(.+?)\\|', '\\1') | trim | replace(' ','') }}"
+      when: 
+        - pgstatus.rc | int == 0
+        - replication_host != ""
+        - replication_host | int == 0
+
+    - debug: 
+        var: pgsqlrep_master 
+      when: 
+        - pgstatus.rc | int == 0
+        - pgsqlrep_master != "None"
+        - replication_host | int == 0
+
+    - name: "Primay Host is {{ pgsqlrep_master }}"
+      debug:
+        msg: "Primary Host: {{ pgsqlrep_master }}"
+      when: 
+        - pgstatus.rc | int == 0 
+        - pgsqlrep_master != "None"
+        - replication_host | int == 0
+
+
+    # - name: Create master database group
+    #   add_host:
+    #     hostname: "{{ pgsqlrep_master[0] }}"
+    #     groups: database_primary
+    #   loop: "{{ ansible_play_hosts }}"
+
+
+    - name: Create master database group
+      add_host:
+        hostname: "{{ pgsqlrep_master[0] }}"
+        groups: database_primary
+      when: 
+        - pgstatus.rc | int == 0
+        - pgsqlrep_master != "None"
+
+
+
+
+
+# - name: Check Facts from Previous Task
+#   hosts: localhost
+#   gather_facts: false
+#   any_errors_fatal: true
+#   vars_files:
+#     - secret_vars/{{ environ }}.yml
+#     - roles/postgres_repmgr/vars/repmgr.yml
+#   tasks:
+
+#     - debug: 
+#         var: pgsqlrep_master  
+
+#     - name: Compare host names in next Task
+#       debug:
+#         msg: "Validate if Split Brain Issue"
+#       delegate_to: localhost
+#       failed_when: >
+#         ( hostvars[groups['database'][0]]['pgsqlrep_master'] != hostvars[groups['database_replica'][0]]['pgsqlrep_master'] ) and
+#         ( hostvars[groups['database_replica'][0]]['pgsqlrep_master'] != hostvars[groups['database_replica'][1]]['pgsqlrep_master'] ) and       
+#         ( hostvars[groups['database_replica'][1]]['pgsqlrep_master'] != hostvars[groups['database'][0]]['pgsqlrep_master'] )
+
+#     - name: Create master database group
+#       add_host:
+#         hostname: "{{ pgsqlrep_master[0] }}"
+#         groups: database_primary
+#       changed_when: false

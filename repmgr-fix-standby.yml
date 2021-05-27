@@ -1,0 +1,67 @@
+---
+
+- import_playbook: repmgr-determine-primary-ha-script.yml
+
+# - name: Set other servers to be standby and reconfigure replication
+#   hosts: "database_replica:database:!{{ failover_target }}"
+#   serial: 1
+#   vars_files:
+#     - secret_vars/{{ environ }}.yml
+#   tasks:
+#     - include_role:
+#         name: postgresql
+#       vars:
+#         pgsqlrep_master_address: "{{ failover_target }}"
+#         pgsqlrep_role: replica
+#   tags: setup_replication
+
+
+
+- name: Correcting other servers as standby except  Primary "{{ groups['database_primary'] [0] }} "
+  hosts: "database_replica:database:!database_primary"
+  serial: 1
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  tasks:
+
+    - name: shutdown replica databases
+      service:
+        name: "postgresql-9.6"
+        state: stopped
+        enabled: yes
+
+    - name: "Make sure other server joined in standby mode"
+      shell: "{{ postgres_repmgr_bin }} node rejoin --force-rewind --verbose -d 'host= {{ groups['database_primary'] [0] }} user=repmgr dbname=repmgr connect_timeout=2'"
+      retries: 5
+      delay: 5
+      register: is_promoted
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: "Register in standby mode"
+      command: "{{ postgres_repmgr_bin }} standby register -F"
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+      ignore_errors: true
+
+
+    - name: "Follow Standby to Master"
+      command: "{{ postgres_repmgr_bin }} standby follow  -F"
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+      ignore_errors: true
+
+    - name: restart repmgr96.service
+      service:
+        name: "repmgr96.service"
+        state: started
+        enabled: true
+      ignore_errors: yes
+

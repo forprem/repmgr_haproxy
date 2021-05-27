@@ -1,0 +1,211 @@
+---
+- import_playbook: repmgr-determine-primary-ha-script.yml
+
+- name: Get database status
+  hosts: "{{ groups['database_primary'] }}"
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  tasks:
+#----------------  RepMgr Cluster  -----------------#
+    - name: Check for Postgres Replication Cluter
+      shell: "{{ postgres_repmgr_bin }} cluster show"
+      register: cluster_show
+      ignore_errors: yes
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+
+    - name: "Postgres Cluster Status"
+      debug:
+        msg: "{{ cluster_show.stdout }}"
+
+#----------------  RepMgr Node Check  -----------------#
+    - name: Check for Postgres Replication Nodes
+      shell: "{{ postgres_repmgr_bin }} node check"
+      register: node_check
+      ignore_errors: yes
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+
+    - name: "Postgres Replication Nodes"
+      debug:
+        msg: "{{ node_check.stdout }}"
+
+#----------------  RepMgr Node Status  -----------------#
+    - name: Check for Postgres Replication Node Status
+      shell: "{{ postgres_repmgr_bin }} node status"
+      register: node_status
+      ignore_errors: yes
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+
+    - name: "Postgres Replication Node Status"
+      debug:
+        msg: "{{ node_status.stdout }}"
+
+
+#----------------replication delay -----------------#
+
+    - name: Check for replication delay"
+      command: psql  -x -c 'select now() - pg_last_xact_replay_timestamp() AS replication_delay;'
+      register: replication_delay
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: "Output replication_delay"
+      debug:
+        msg: "{{ replication_delay.stdout }}"
+
+#----------------cluster ID  -----------------#
+
+    - name: Check for cluster_UID Master node"
+      command: psql -c "SELECT system_identifier FROM pg_control_system()"
+      register: system_identifier
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: "Output system_identifier."
+      debug:
+        msg: "{{ system_identifier.stdout }}"
+
+#----------------COUNT WAL FILES  -----------------#
+
+    - name: Check for WAL COUNTS on Master node"
+      command: psql -x -c "SELECT COUNT(*) FROM pg_ls_dir('pg_xlog') WHERE pg_ls_dir ~ '^[0-9A-F]{24}';"
+      register: wal_counts
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: "Output wal_counts."
+      debug:
+        msg: "{{ wal_counts.stdout }}"
+
+       #----------------latest REDO  -----------------#
+
+    - name: Check for WAL COUNTS on Master node"
+      shell: /usr/pgsql-9.6/bin/pg_controldata  -D /var/lib/pgsql/9.6/data/ | grep -E '(Database cluster state)| (REDO location)'
+      register: redo
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: "Output redo location"
+      debug:
+        msg: "{{ redo.stdout }}"
+
+#----------------replication status -----------------#
+
+    - name: show replication status on master
+      shell: psql -x -c "select * from pg_stat_replication;"
+      register: pg_stat_replication
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: "Output pg_stat_replication "
+      debug:
+        msg: "{{ pg_stat_replication.stdout }}"
+
+#----------------Replication Slots status -----------------#
+
+    - name: show replication slots on master
+      shell: psql -x -c "SELECT slot_name, active FROM pg_replication_slots;"
+      register: repl_slots
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: "Output Replication Slots "
+      debug:
+        msg: "{{ repl_slots.stdout }}"
+
+#----------------Inactive Replication Slots -----------------#
+
+    - name: show inactive replication slots on master
+      shell: psql -c "SELECT slot_name FROM pg_replication_slots where active = 'f';"
+      register: inactive_slots
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: Get replication slot list from master
+      set_fact:
+        server_slot_list:  "{{ inactive_slots.stdout | regex_findall('[^\\s-]+com')   }}"
+      when: inactive_slots.stdout_lines is defined
+
+    - debug:
+        msg: "{{ server_slot_list }}"
+      when: server_slot_list | length > 0
+
+
+#----------- Remove Inactive Replication Slots --------------#
+
+    - name: "Remove replication slot {{ server_slot_list }} "
+      postgresql_query:
+        query: "SELECT pg_drop_replication_slot(%s)"
+        positional_args:
+          - "{{ item }}"
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      with_items: "{{ server_slot_list }}"
+      when: server_slot_list is iterable 
+
+
+
+    - name: "Validate If DB is having backup in {{ groups['database_primary'] [0] }}"
+      shell: "pgbackrest info"
+      register: pgb_info
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: Info about backup in Primary {{ groups['database_primary'] [0] }}
+      debug:
+        msg: "{{ groups['database_primary'] [0] }} info DB Backup {{ pgb_info.stdout }}."
+
+#----------- Service Status --------------#
+
+    # - name: Populate service facts
+    #   service_facts:
+    # - debug:
+    #     var: ansible_facts.services
+
+    - name: Check the status of DB list of services
+      shell: systemctl list-units|grep "{{ item }}"|awk '{ print $1,$2,$3,$4}'
+      with_items:
+        - postgreschk.socket
+        - repmgr96
+        - postgresql-9.6
+      register: service_status
+      changed_when: false
+
+    - name: Display DB services status
+      debug:
+        msg: "{{ item.stdout }}"
+      with_items: "{{ service_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"

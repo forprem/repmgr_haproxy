@@ -1,0 +1,152 @@
+---
+- import_playbook: repmgr-determine-primary-ha-script.yml
+
+- name: RepMgr Verification
+  hosts: localhost
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+  tasks:
+
+    - name: Validate if RepMgr already exists
+      fail:
+        msg: "RepMgr Cluster is not avialable or primary is not avialable"
+      when: groups['database_primary'] is not defined
+
+
+- name: Check unreachable server in Primary "{{ groups['database_primary'] [0] }} "
+  hosts: "{{ groups['database_primary'] }}"
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  serial: 1
+  tasks:
+
+    - name: Check for unreachable server in Replication Cluter
+      shell: "{{ postgres_repmgr_bin }} service status | grep 'unreachable'"
+      register: is_in_unreachablehost
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+    - name: Fail when database is not having unreachable host
+      fail:
+        msg: "RepMgr Cluster is not having any unreachable Host."
+      when:
+        - "'unreachable' not in is_in_unreachablehost.stdout"
+        - not force_database_failover|default(false)|bool      
+
+
+    - name: unreachable Host Info set in Fact
+      set_fact:
+        unreachable_host: "{{ is_in_unreachablehost.stdout  | regex_search('\\|(.+?)\\|', '\\1') | trim | replace(' ','') }}"
+
+    - debug: 
+        var: unreachable_host 
+
+
+    - name: add unreachable host variables to host
+      add_host:
+        name: "hostname_fix"
+        unreachable_host:  "{{ unreachable_host }}"        
+
+
+
+    - name: Make Sure unreachable databases is shutdown
+      service:
+        name: "postgresql-9.6"
+        state: stopped
+        enabled: yes
+      delegate_to: "{{ unreachable_host[0] }}"
+      when:
+        - "'unreachable' in is_in_unreachablehost.stdout"
+
+# ***********  Join unreachable Server If new replica config not required  **********
+    # - name: "Join unreachable server in standby mode"
+    #   shell: "{{ postgres_repmgr_bin }} node rejoin --force-rewind --verbose -d 'host= {{ groups['database_primary'] [0] }}  user=repmgr dbname=repmgr connect_timeout=2'"
+    #   register: is_joined
+    #   delegate_to: "{{ unreachable_host[0] }}"
+    #   become: yes
+    #   become_user: "postgres"
+    #   become_method: su
+    #   changed_when: false
+# *********  End Join unreachable Server If new replica config not required  *********
+
+
+# ************  In case you are configuring the Standby DB Again  **************
+# ******************************************************************************
+# - name: Set unreachable server to be standby and reconfigure 
+#   hosts: "{{ hostvars['hostname_fix']['unreachable_host'] }}"
+#   serial: 1
+#   vars_files:
+#     - secret_vars/{{ environ }}.yml
+#     - roles/postgres_repmgr/vars/repmgr.yml
+#   tasks:
+#     - include_role:
+#         name: postgresql
+#       vars:
+#         pgsqlrep_master_address: "{{ groups['database_primary'] [0] }}"
+#         pgsqlrep_role: replica
+#         unreachable_host: "{{ hostvars['hostname_fix']['unreachable_host'] }}"
+#   tags: setup_replication
+
+
+- name: Register and Join Primary "{{ groups['database_primary'] [0] }} "
+  hosts: "{{ hostvars['hostname_fix']['unreachable_host'] }}"
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgres_repmgr/vars/repmgr.yml
+    - roles/postgresql/defaults/main.yml
+  serial: 1
+  tasks:
+    - name: register replica node to repmgr
+      shell: "{{ postgres_repmgr_bin }} standby register -F -d 'host= {{ groups['database_primary'] [0] }}  user=repmgr dbname=repmgr connect_timeout=2'"
+      register: is_register
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      ignore_errors: true
+
+    - name: Make Sure unreachable databases is stopped
+      service:
+        name: "postgresql-9.6"
+        state: stopped
+        enabled: yes
+
+    - name: Join unreachable server in standby mode
+      shell: "{{ postgres_repmgr_bin }} node rejoin --force-rewind --verbose -d 'host= {{ groups['database_primary'] [0] }}  user=repmgr dbname=repmgr connect_timeout=2'"
+      retries: 5
+      delay: 5
+      register: is_joined
+      become: yes
+      become_user: "postgres"
+      become_method: su
+      changed_when: false
+
+# **************** Replication Slot Info  *************
+    - name: "Replication slots"
+      block:
+      - name: "Check for replication slots on previous unreachable Host"
+        postgresql_query:
+          query: "SELECT slot_name, active FROM pg_replication_slots"
+          login_user: "{{ postgresql_admin_user }}"
+        become: yes
+        become_user: "{{ postgresql_service_user }}"
+        become_method: su
+        register: replica_slots
+
+      - debug:
+          msg: "{{ item }}"
+        with_items: "{{ replica_slots.query_result }}"
+        when:
+          - replica_slots.rowcount > 0
+
+# **************** Replication Slot Info End *************      
+
+
+
+
+# ***********  End configuring Standby DB and Join Master RepMgr  **************
+# ******************************************************************************
+

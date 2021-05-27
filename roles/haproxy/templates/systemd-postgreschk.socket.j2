@@ -1,0 +1,9 @@
+[Unit]
+Description=Postgres Cluster Check Status on port 9201
+
+[Socket]
+ListenStream = 9201
+Accept = yes
+
+[Install]
+WantedBy=sockets.target

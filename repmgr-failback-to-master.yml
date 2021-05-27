@@ -1,0 +1,4 @@
+---
+- import_playbook: repmgr-failover-so.yml
+  vars:
+    failover_target: "{{ groups['database'][0] }}"

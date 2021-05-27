@@ -1,0 +1,48 @@
+- hosts: awx:awx_bcp
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - postgres_ha
+
+# *********** AWX Points to local host on 5432 Port for HA Proxy **********
+- name: Update Ansible AWX Tower database configuration
+  hosts: awx:awx_bcp
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+  vars:
+    pg_host: "127.0.0.1"
+    pg_port: "5432"
+  become: yes
+  tasks:
+    - include_role:
+        name: awx_config
+        tasks_from: awx_update_settings
+    - include_role:
+        name: awx_config
+        tasks_from: awx_set_channel_conf.yml
+# *********** HA  Port End **********
+
+- import_playbook: repmgr-determine-primary-ha-script.yml 
+
+- hosts: database_primary
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgresql/defaults/main.yml
+  roles:
+    - role: postgres_ha
+      vars:
+        pgsqlrep_role: master
+
+- hosts: "database_replica:database:!database_primary"
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+    - roles/postgresql/defaults/main.yml
+  roles:
+    - role: postgres_ha
+

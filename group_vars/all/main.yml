@@ -1,0 +1,9 @@
+#
+# Connect to nodes as root user.
+#
+
+
+
+pg_username: "{{ vault_pg_username }}"
+pg_password: "{{ vault_pg_password }}"
+

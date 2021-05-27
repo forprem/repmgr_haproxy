@@ -1,0 +1,59 @@
+---
+# tasks file for roles/ssh_setup
+
+- name: "Perform pre-check"
+  include_tasks: pre_check.yml
+
+- name: "Source host"
+  debug:
+    var: ssh_setup_source_host
+
+- name: "Target host(s)"
+  debug:
+    var: ssh_setup_target_hosts
+
+- name: "Check for .ssh directory | {{ ssh_setup_source_host }}"
+  stat:
+    path: "{{ ssh_setup_ssh_dir }}"
+  become: yes
+  become_user: "{{ ssh_setup_user }}"
+  become_method: "{{ ssh_setup_default_become_method }}"
+  register: ssh_setup_ssh_dir_stat
+  delegate_to: "{{ ssh_setup_source_host }}"
+
+
+- name: "Check for RSA key | {{ ssh_setup_source_host }}"
+  stat:
+    path: "{{ ssh_setup_ssh_dir }}/{{ ssh_setup_ssh_key_name }}"
+  become: yes
+  become_user: "{{ ssh_setup_user }}"
+  become_method: "{{ ssh_setup_default_become_method }}"
+  register: ssh_setup_ssh_key_stat
+  delegate_to: "{{ ssh_setup_source_host }}"
+  when: ssh_setup_ssh_dir_stat.stat.exists
+
+- name: "Read RSA pub key | {{ ssh_setup_source_host }}"
+  slurp:
+    src: "{{ ssh_setup_ssh_dir }}/{{ ssh_setup_ssh_key_name }}.pub"
+  register: ssh_setup_pub_key_content
+  no_log: True
+  become: yes
+  become_method: "{{ ssh_setup_default_become_method }}"
+  become_user: "{{ ssh_setup_user }}"
+  delegate_to: "{{ ssh_setup_source_host }}"
+  when: ssh_setup_ssh_key_stat.stat.exists
+
+
+- name: "Remove RSA pair | {{ ssh_setup_source_host }}"
+  openssh_keypair:
+    path: "{{ ssh_setup_ssh_dir }}/{{ ssh_setup_ssh_key_name }}"
+    state: absent
+  become: yes
+  become_method: "{{ ssh_setup_default_become_method }}"
+  become_user: "{{ ssh_setup_user }}"
+  delegate_to: "{{ ssh_setup_source_host }}"
+  when: ssh_setup_ssh_key_stat.stat.exists
+
+- name: "Remove access from target hosts"
+  include_tasks: remove_access_target_hosts.yml
+  loop: "{{ ssh_setup_target_hosts }}"

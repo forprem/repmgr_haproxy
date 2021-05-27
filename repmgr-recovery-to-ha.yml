@@ -1,0 +1,5 @@
+---
+- import_playbook: repmgr-recovery.yml
+  vars:
+    recovery_target: "{{ groups['database_replica'][0] }}"
+    bcp_slot: "repmgr_slot_{{ repmgr_nodeid }}"

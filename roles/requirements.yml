@@ -1,0 +1,3 @@
+- src: https://tfs.ups.com/tfs/UpsProd/P08AGIT_EnterpriseInnovation/_git/ups-lib-cert-mgt
+  version: 1.0.0+latest
+  scm: git

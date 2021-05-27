@@ -1,0 +1,17 @@
+---
+
+- name: update postgresql.conf for hot_standby, shared lib 
+  lineinfile:
+    path: "{{ postgres_data }}/postgresql.conf"
+    regexp: "{{item.src}}"
+    line: "{{item.dest}}"
+    owner: postgres
+    group: postgres
+    mode: '0644'
+  with_items:
+    - { src: "^hot_standby =.*$", dest: "hot_standby = on"}
+    - { src: "^shared_preload_libraries.*$", dest: "shared_preload_libraries = 'repmgr'"} 
+    - { src: "^wal_log_hints =.*$", dest: "wal_log_hints = on"}
+    - { src: "^max_replication_slots =.*$", dest: "max_replication_slots = 5"}
+  notify: restart postgres
+

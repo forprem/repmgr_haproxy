@@ -1,0 +1,12 @@
+---
+# defaults file for roles/ssh_setup
+
+ssh_setup_ssh_dir: "~/.ssh/"
+ssh_setup_ssh_key_name: "id_rsa"
+ssh_setup_user: postgres
+ssh_setup_ssh_auth_key_path: "/etc/ssh/auth_keys/{{ ssh_setup_user }}"
+ssh_setup_source_host:
+ssh_setup_target_hosts:
+ssh_ssh_setup_action: add
+ssh_setup_known_hosts: True
+ssh_setup_default_become_method: "{{ default_become_method | default('su',True) }}"

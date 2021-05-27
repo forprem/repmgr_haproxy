@@ -1,0 +1,73 @@
+
+- name: "Copy postgreschk service to systemd"
+  template:
+    src: systemd-postgreschk.service.j2
+    dest: "/usr/lib/systemd/system/postgreschk@.service"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  notify: restart postgreschk.socket
+
+- name: "Copy postgreschk socket to systemd"
+  template:
+    src: systemd-postgreschk.socket.j2
+    dest: "/usr/lib/systemd/system/postgreschk.socket"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  notify: restart postgreschk.socket
+
+- name: "Copy postgreschk conf to usr/local/sbin"
+  template:
+    src: postgreschk.j2
+    dest: "/usr/local/sbin/postgreschk"
+    owner: "postgres"
+    group: "postgres"
+    mode: "0700"
+
+- include_role:
+    name:  postgresql
+    tasks_from: users.yml
+  when:
+    - pgsqlrep_role is defined
+    - pgsqlrep_role == 'master'
+
+- include_role:
+    name:  postgresql
+    tasks_from: users_privileges.yml
+  when:
+    - pgsqlrep_role is defined
+    - pgsqlrep_role == 'master'
+
+- name: "PostgreSQL | Update credential"
+  postgresql_user:
+    db: "postgres"
+    name: "{{ xinetd_monitor_username }}"
+    password: "readonly"
+    encrypted: no
+  become: yes
+  become_user: "postgres"
+  become_method: su
+  when:
+    - pgsqlrep_role is defined
+    - pgsqlrep_role == 'master'
+
+- name: change journal configuration SystemMaxUse
+  lineinfile:
+    path: "/etc/systemd/journald.conf"
+    regexp: "#SystemMaxUse="
+    line: "SystemMaxUse=4096M"
+
+- name: change journal configuration MaxRetentionSec
+  lineinfile:
+    path: "/etc/systemd/journald.conf"
+    regexp: "#MaxRetentionSec="
+    line: "MaxRetentionSec=30day"
+  notify: restart journal
+
+- name: change postgres pg hba access
+  lineinfile:
+    path: "{{ postgresql_conf_directory }}/pg_hba.conf"
+    regexp: "host  postgres  {{ xinetd_monitor_username }}  {{ inventory_hostname }}  md5"
+    line: "host  postgres  {{ xinetd_monitor_username }}  {{ inventory_hostname }}  md5"
+  notify: restart postgres

@@ -1,0 +1,52 @@
+# *********** AWX Points to local host on 5432 Port for HA Proxy **********
+- name: Disable HAProxy admin module configuration
+  hosts: awx[0]
+  vars_files:
+    - secret_vars/{{ environ }}.yml
+  vars:
+    pg_host: "127.0.0.1"
+    pg_port: "5432"
+  become: yes
+  tasks:
+# *********** HA  Port End **********
+
+    - name: comment haproxy.conf for admin paramters 
+      lineinfile:
+        path: "/etc/haproxy/haproxy.cfg"
+        regexp: "{{item.src}}"
+        line: "{{item.dest}}"
+        owner: root
+        group: root
+        mode: '0644'
+      with_items:
+        - { src: "listen stats :1936", dest: "#listen stats :1936"}
+        - { src: "    mode http", dest: "#    mode http"} 
+        - { src: "    stats enable", dest: "#    stats enable"}
+        - { src: "    stats hide-version", dest: "#    stats hide-version"}
+        - { src: "    stats realm Haproxy\\\\ Statistics", dest: "#    stats realm Haproxy\\ Statistics"} 
+        - { src: "    stats uri /", dest: "#    stats uri /"}
+        - { src: "    stats auth admin:password", dest: "#    stats auth admin:password"}
+
+
+    - name: Restart haproxy
+      service:
+        name: "haproxy"
+        state: restarted
+        enabled: yes
+
+    - name: Check the status of AWX list of services
+      shell: systemctl list-units|grep "{{ item }}"|awk '{ print $1,$2,$3,$4}'
+      with_items:
+        - supervisord
+        - nginx
+        - haproxy
+        - rh-redis5-redis
+      register: service_status
+      changed_when: false
+
+    - name: Display AWX services status
+      debug:
+        msg: "{{ item.stdout }}"
+      with_items: "{{ service_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"

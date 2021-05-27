@@ -1,0 +1,24 @@
+#ssl cert variables
+# following commented variables must be available for ssl to work (vaulting is recommended )
+##############################
+# vault_comodo_organization_id: "org id acquired from security team after requesting api account for certificate"
+# vault_certificate_organization_unit: "6 digit department code"
+# vault_comodo_user_login: "xxxxxx"
+# vault_comodo_user_password: "xxxxxxxx"
+# vault_http_proxy: "http://{{ vault_proxy_username }}:{{ vault_proxy_password }}@{{ vault_proxy }}"
+###############################
+manage_certificates: true
+comodo_user_login: "{{ vault_comodo_user_login }}"
+comodo_user_password: "{{ vault_comodo_user_password }}"
+http_proxy: "{{ vault_http_proxy }}"
+comodo_organization_id: "{{ vault_comodo_organization_id }}"
+certificate_organization_unit: "{{ vault_certificate_organization_unit }}"
+certificate_common_name: "{{ inventory_hostname }}"
+csr_name: "{{ certificate_common_name }}"
+key_name: "{{ certificate_common_name }}"
+live_cert_path: "{{ csr_path }}/certs/live"
+previous_cert_path: "{{ csr_path }}/certs/previous"
+current_cert_path: "{{ live_cert_path }}"
+key_path: "{{ csr_path }}"
+cert_path: "{{ new_cert_path }}"
+certificate_term: "365"
