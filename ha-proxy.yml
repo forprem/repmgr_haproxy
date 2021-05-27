@@ -33,7 +33,7 @@
     - secret_vars/{{ environ }}.yml
     - roles/postgresql/defaults/main.yml
   roles:
-    - role: postgres_ha
+    - role: haproxy
       vars:
         pgsqlrep_role: master
 
@@ -44,5 +44,5 @@
     - secret_vars/{{ environ }}.yml
     - roles/postgresql/defaults/main.yml
   roles:
-    - role: postgres_ha
+    - role: haproxy
 

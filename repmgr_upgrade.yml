@@ -1,4 +1,3 @@
-- import_playbook: awx-enable-repos.yml
 
 - import_playbook: repmgr-determine-primary-ha-script.yml
   ignore_errors: yes
@@ -80,5 +79,4 @@
         node_id: "{{ hostvars['localhost']['node_id'][0] }}"
       when: groups['database_primary'] is defined
 
-
-#- import_playbook: awx-disable-repos.yml  
+ 
